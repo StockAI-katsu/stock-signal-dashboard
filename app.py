@@ -24,16 +24,7 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # 1. Streamlit Cloudの secrets から優先して読み込む
-    try:
-        if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"Streamlit Secretsからの認証に失敗しました: {e}")
-
-    # 2. ローカルの credentials.json を探す（手元でテスト実行する場合のフォールバック）
+    # 1. ローカルの credentials.json を優先して探す
     json_path = "credentials.json"
     if os.path.exists(json_path):
         try:
@@ -42,6 +33,15 @@ def get_gspread_client():
         except Exception as e:
             st.error(f"credentials.json の読み込みに失敗しました: {e}")
             return None
+
+    # 2. Streamlit Cloud等の secrets を探す（ローカルにファイルがない場合のフォールバック）
+    try:
+        if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            return gspread.authorize(creds)
+    except Exception:
+        pass
 
     return None
 
@@ -52,42 +52,49 @@ def load_excel_stock_master():
     market_dict = {}
     sector_dict = {}
 
-    if os.path.exists(EXCEL_MASTER_FILE):
-        try:
-            df_ex = pd.read_excel(
-                EXCEL_MASTER_FILE, sheet_name="銘柄データ", dtype={"コード": str}
-            )
-            for _, row in df_ex.iterrows():
-                code = str(row["コード"]).replace(".T", "").strip().zfill(4)
-                name = str(row["銘柄名"]).strip()
-                market_raw = str(row.get("市場・商品区分", ""))
-                sector_raw = str(
+    # ご自身のスプレッドシートのURLに書き換えてください
+    sheet_url = "https://docs.google.com/spreadsheets/d/【あなたのスプレッドシートID】/export?format=csv&gid=0"
+
+    try:
+        # Excelの読み込みから、スプレッドシートのCSV読み込みに変更
+        df_ex = pd.read_csv(sheet_url, dtype={"コード": str})
+        
+        for _, row in df_ex.iterrows():
+            code_raw = str(row.get("コード", "")).replace(".T", "").strip()
+            if not code_raw or code_raw.lower() == "nan" or not code_raw.isdigit():
+                continue
+            code = code_raw.zfill(4)
+
+            name = str(row.get("銘柄名", "")).strip()
+            market_raw = str(row.get("市場・商品区分", ""))
+            sector_raw = str(
+                row.get(
+                    "33業種区分",
                     row.get(
-                        "33業種区分",
-                        row.get(
-                            "セクター", row.get("33業種", row.get("業種", "未分類"))
-                        ),
-                    )
+                        "セクター", row.get("33業種", row.get("業種", "未分類"))
+                    ),
+                )
+            )
+
+            name_dict[code] = name
+
+            if "プライム" in market_raw:
+                market_dict[code] = "プライム"
+            elif "スタンダード" in market_raw:
+                market_dict[code] = "スタンダード"
+            elif "グロース" in market_raw:
+                market_dict[code] = "グロース"
+            else:
+                market_dict[code] = (
+                    market_raw if market_raw != "nan" else "プライム"
                 )
 
-                name_dict[code] = name
-
-                if "プライム" in market_raw:
-                    market_dict[code] = "プライム"
-                elif "スタンダード" in market_raw:
-                    market_dict[code] = "スタンダード"
-                elif "グロース" in market_raw:
-                    market_dict[code] = "グロース"
-                else:
-                    market_dict[code] = (
-                        market_raw if market_raw != "nan" else "プライム"
-                    )
-
-                sector_dict[code] = (
-                    sector_raw if sector_raw != "nan" and sector_raw != "" else "未分類"
-                )
-        except Exception as e:
-            print(f"Excel読み込みエラー: {e}")
+            sector_dict[code] = (
+                sector_raw if sector_raw != "nan" and sector_raw != "" else "未分類"
+            )
+    except Exception as e:
+        print(f"スプレッドシート読み込みエラー: {e}")
+        
     return name_dict, market_dict, sector_dict
 
 
@@ -119,7 +126,7 @@ def load_master():
     df = pd.DataFrame(columns=ALL_COLUMNS)
     client = get_gspread_client()
     if client is None:
-        st.error("Googleスプレッドシートの認証情報（credentials.json または secrets）が見つかりません。")
+        st.error("Googleスプレッドシートの認証情報（credentials.json）が見つかりません。")
         return df
 
     try:
