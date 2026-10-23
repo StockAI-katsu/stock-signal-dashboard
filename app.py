@@ -53,7 +53,7 @@ def load_excel_stock_master():
     sector_dict = {}
 
     # ご自身のスプレッドシートのURLに書き換えてください
-    sheet_url = "https://docs.google.com/spreadsheets/d/【あなたのスプレッドシートID】/export?format=csv&gid=0"
+    sheet_url = "https://docs.google.com/spreadsheets/d/11qtf0L__69eW3b_jNfXMz6L5uKcZWRZnUtKeVFuirrE/export?format=csv&gid=0"
 
     try:
         # Excelの読み込みから、スプレッドシートのCSV読み込みに変更
